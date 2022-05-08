@@ -1,0 +1,4 @@
+src/test/testcases
+src/test/solutions
+__pycache__
+target/
