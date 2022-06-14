@@ -1,0 +1,6 @@
+make --dry-run --always-make --keep-going --print-directory
+make: Entering directory '/home/namle/programming/principle-programming-language/Assignment3/initial'
+make: Leaving directory '/home/namle/programming/principle-programming-language/Assignment3/initial'
+ 
+make: *** No targets specified and no makefile found.  Stop.
+

@@ -15,5 +15,7 @@ parser:
 	python run.py test ParserSuite
 checker:
 	python run.py test CheckerSuite
+codegen:
+	python run.py test CodeGenSuite
 clean:
 	rm -rf ../target/*

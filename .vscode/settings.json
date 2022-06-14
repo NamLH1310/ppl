@@ -1,9 +1,10 @@
 {
   "python.analysis.extraPaths": [
     "src/test/",
-    "src/main/d96/*/",
     "src/main/d96/parser/",
     "src/main/d96/utils/",
+    "src/main/d96/checker/",
+    "src/main/d96/codegen/",
     "target/main/d96/parser/"
   ],
   "editor.tabSize": 4,

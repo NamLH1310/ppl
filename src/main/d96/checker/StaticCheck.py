@@ -4,35 +4,36 @@
 """
 from AST import * 
 from Visitor import *
-from Utils import Utils
+# from Utils import Utils
 from StaticError import *
 
 
-@dataclass
 class Context:
-    has_entry_point = False
-    has_array_cell_error = False
-    has_value = True
-    is_param = False
-    is_vardecl = False
-    is_constDecl = False
-    is_assign = False
-    is_classmember = False
-    is_static = False
-    is_assign_to_const = False
-    is_call_member = False
-    is_init_decl = False
-    is_in_for_stmt = False
-    is_in_static_method = False
-    is_const_init_val = False
-    unknown_expr_value = False
-    passdown_ast = None
-    call_method_name = None
-    self_literal = None
-    current_class_name = None
-    current_method_name = None
-    param_type_list = []
-    field_name = None
+    def __init__(self):
+        self.has_entry_point = False
+        self.has_array_cell_error = False
+        self.has_value = True
+        self.is_param = False
+        self.is_vardecl = False
+        self.is_constDecl = False
+        self.is_assign = False
+        self.is_classmember = False
+        self.is_static = False
+        self.is_assign_to_const = False
+        self.is_call_member = False
+        self.is_init_decl = False
+        self.is_in_for_stmt = False
+        self.is_in_static_method = False
+        self.is_const_init_val = False
+        self.unknown_expr_value = False
+        self.has_value_rhs = False
+        self.passdown_ast = None
+        self.call_method_name = None
+        self.self_literal = None
+        self.current_class_name = None
+        self.current_method_name = None
+        self.param_type_list = []
+        self.field_name = None
 
 def get_class_member_type(
     scope_table: dict,
@@ -56,7 +57,10 @@ def get_class_member_type(
                         context.param_type_list = None
                     else: 
                         for param, arg in zip(mem.param, context.param_type_list):
-                            if type(param.varType) is not type(arg):
+                            if type(param.varType) is FloatType and type(arg) not in (FloatType, IntType):
+                                context.param_type_list = None
+                                break
+                            elif type(param.varType) is not FloatType and type(param.varType) is not type(arg):
                                 context.param_type_list = None
                                 break
                             elif type(param.varType) is ArrayType and (param.varType.size != arg.size or type(param.varType.eleType) is not type(arg.eleType)):
@@ -86,7 +90,10 @@ def get_class_member_type(
                     context.param_type_list = None
                 else: 
                     for param, arg in zip(mem.param, context.param_type_list):
-                        if type(param.varType) is not type(arg):
+                        if type(param.varType) is FloatType and type(arg) not in (FloatType, IntType):
+                            context.param_type_list = None
+                            break
+                        elif type(param.varType) is not FloatType and type(param.varType) is not type(arg):
                             context.param_type_list = None
                             break
                         elif type(param.varType) is ArrayType and (param.varType.size != arg.size or type(param.varType.eleType) is not type(arg.eleType)):
@@ -98,8 +105,8 @@ def get_class_member_type(
 
                 return method_return_table[class_name + '.' + method_name]
 
-    if decl.parentname:
-        return get_class_member_type(scope_table, scope_table[decl.parentname.name], mem_name, context, method_return_table, is_attr)
+    # if decl.parentname:
+    #     return get_class_member_type(scope_table, scope_table[decl.parentname.name], mem_name, context, method_return_table, is_attr)
     
     if is_attr:
         raise Undeclared(Attribute(), mem_name)
@@ -127,17 +134,18 @@ def is_sub_class(class_decl_parent: ClassDecl, class_decl_child: ClassDecl, scop
     return is_sub_class(class_decl_parent, scope[class_decl_child.parentname.name], scope)
 
 
-class StaticChecker(BaseVisitor,Utils):
-    
+class StaticChecker(BaseVisitor):
+    global_scope = [{}]
+
     def __init__(self, ast):
         self.method_return_type = {}
         self.has_value = {}
         self.ast = ast
         self.context = Context()
+        StaticChecker.global_scope = [{}]
     
     def check(self):
-        global_scope = [{}]
-        return self.visit(self.ast, global_scope)
+        return self.visit(self.ast, StaticChecker.global_scope)
 
     def visitProgram(self, ast: Program, scope): 
         for decl in ast.decl:
@@ -147,7 +155,7 @@ class StaticChecker(BaseVisitor,Utils):
             raise NoEntryPoint()
         return []
     
-    def visitClassDecl(self, ast: ClassDecl, scopes: list[dict]):
+    def visitClassDecl(self, ast: ClassDecl, scopes):
         class_name = ast.classname.name
         if class_name in scopes[0]:
             raise Redeclared(Class(), class_name)
@@ -163,11 +171,13 @@ class StaticChecker(BaseVisitor,Utils):
             self.visit(decl, new_scopes)
         self.context.current_class_name = None
         
-    def visitMethodDecl(self, ast: MethodDecl, scopes: list[dict]):
+    def visitMethodDecl(self, ast: MethodDecl, scopes):
         method_name = ast.name.name
         if method_name in scopes[0]:
             if type(scopes[0][method_name]) is MethodDecl:
                 raise Redeclared(Method(), method_name)
+            elif type(scopes[0][method_name]) is AttributeDecl:
+                ... # Do nothing
             else:
                 raise Redeclared(Identifier(), method_name)
 
@@ -182,7 +192,7 @@ class StaticChecker(BaseVisitor,Utils):
         self.context.is_param = True
         for decl in ast.param:
             self.visit(decl, new_scopes)
-        self.context.is_in_static_method = '$' in method_name or type(ast.kind) is Static
+        self.context.is_in_static_method = '$' in method_name or (type(ast.kind) is Static and (method_name != "main" or self.context.current_class_name != "Program"))
         self.context.is_param = False
         self.context.current_method_name = method_name
         key = self.context.current_class_name + '.' + self.context.current_method_name
@@ -193,7 +203,7 @@ class StaticChecker(BaseVisitor,Utils):
             self.method_return_type[key] = VoidType()
 
     
-    def visitAttributeDecl(self, ast: AttributeDecl, scopes: list[dict]):
+    def visitAttributeDecl(self, ast: AttributeDecl, scopes):
         decl = ast.decl
         self.context.is_classmember = True
         self.visit(decl, scopes)
@@ -201,16 +211,18 @@ class StaticChecker(BaseVisitor,Utils):
         attr_name = decl.variable.name if type(decl) is VarDecl else decl.constant.name
         scopes[0][attr_name] = ast
     
-    def visitVarDecl(self, ast: VarDecl, scopes: list[dict]):
+    def visitVarDecl(self, ast: VarDecl, scopes):
         var_name = ast.variable.name
         if var_name in scopes[0]:
             if self.context.is_param:
                 raise Redeclared(Parameter(), var_name)
-            elif self.context.is_classmember and type(scopes[0][var_name].decl) is VarDecl:
-                raise Redeclared(Attribute(), var_name)
-            elif type(scopes[0][var_name]) is VarDecl:
+            elif self.context.is_classmember:
+                if type(scopes[0][var_name]) is MethodDecl:
+                    ... # Do nothing
+                else:
+                    raise Redeclared(Attribute(), var_name)
+            else:
                 raise Redeclared(Variable(), var_name)
-            raise Redeclared(Identifier(), var_name)
         
         if type(ast.varType) is ClassType and ast.varType.classname.name not in scopes[-1]:
             raise Undeclared(Class(), ast.varType.classname.name)
@@ -218,12 +230,7 @@ class StaticChecker(BaseVisitor,Utils):
         scopes[0][var_name] = ast
 
         if ast.varInit:
-            init_val_type = self.visit(ast.varInit, scopes)
-
-            if self.context.is_classmember:
-                self.has_value[self.context.current_class_name + '.' + var_name] = self.context.has_value
-            else:
-                scopes[0][f'#{var_name}'] = self.context.has_value
+            init_val_type, has_value = self.visit(ast.varInit, scopes)
 
             if type(ast.varType) is FloatType and type(init_val_type) not in (IntType, FloatType):
                 raise TypeMismatchInStatement(ast)
@@ -235,23 +242,32 @@ class StaticChecker(BaseVisitor,Utils):
             elif type(init_val_type) is ArrayType:
                 if init_val_type.size != ast.varType.size or type(init_val_type.eleType) is not type(ast.varType.eleType):
                     raise TypeMismatchInStatement(ast)
+
+            if self.context.is_classmember:
+                self.has_value[self.context.current_class_name + '.' + var_name] = has_value
+            else:
+                scopes[0][f'#{var_name}'] = has_value
                 
         else:
             if self.context.is_classmember:
                 self.has_value[self.context.current_class_name + '.' + var_name] = False
+            elif self.context.is_param:
+                scopes[0][f'#{var_name}'] = True
             else:
                 scopes[0][f'#{var_name}'] = False
 
         return ast.varType
         
-    def visitConstDecl(self, ast: ConstDecl, scopes: list[dict]):
+    def visitConstDecl(self, ast: ConstDecl, scopes):
         const_name = ast.constant.name
         if const_name in scopes[0]:
-            if self.context.is_classmember and type(scopes[0][const_name].decl) is ConstDecl:
-                raise Redeclared(Attribute(), const_name)
-            elif type(scopes[0][const_name]) is ConstDecl:
+            if self.context.is_classmember:
+                if type(scopes[0][const_name]) is MethodDecl:
+                    ... # Do nothing
+                else:
+                    raise Redeclared(Attribute(), const_name)
+            else:
                 raise Redeclared(Constant(), const_name)
-            raise Redeclared(Identifier(), const_name)
 
         if type(ast.constType) is ClassType and ast.constType.classname.name not in scopes[-1]:
             raise Undeclared(Class(), ast.constType.classname.name)
@@ -259,7 +275,7 @@ class StaticChecker(BaseVisitor,Utils):
         scopes[0][const_name] = ast
         
         if ast.value:
-            init_val_type = self.visit(ast.value, scopes)
+            init_val_type, has_value = self.visit(ast.value, scopes)
             if type(ast.constType) is FloatType and type(init_val_type) not in (IntType, FloatType):
                 raise TypeMismatchInConstant(ast)
             elif type(ast.constType) is not FloatType and type(init_val_type) is not type(ast.constType):
@@ -270,6 +286,9 @@ class StaticChecker(BaseVisitor,Utils):
             elif type(init_val_type) is ArrayType:
                 if init_val_type.size != ast.constType.size or type(init_val_type.eleType) is not type(ast.constType.eleType):
                     raise TypeMismatchInConstant(ast)
+            
+            if not has_value:
+                raise IllegalConstantExpression(ast.value)
 
             if self.context.is_classmember:
                 self.has_value[self.context.current_class_name + '.' + const_name] = True
@@ -281,41 +300,43 @@ class StaticChecker(BaseVisitor,Utils):
 
         return ast.constType
         
-    def visitBlock(self, ast: Block, scopes: list[dict]):
+    def visitBlock(self, ast: Block, scopes):
         for stmt in ast.inst:
             if type(stmt) is Block:
                 self.visit(stmt, [{}] + scopes)
             else:
                 self.visit(stmt, scopes)
 
-    def visitAssign(self, ast: Assign, scopes: list[dict]):
-        rhs = self.visit(ast.exp, scopes)
+    def visitAssign(self, ast: Assign, scopes):
+        rhs, has_value_rhs = self.visit(ast.exp, scopes)
         
         self.context.is_assign = True
-        lhs = self.visit(ast.lhs, scopes)
+        self.context.has_value_rhs = has_value_rhs
+        lhs, _ = self.visit(ast.lhs, scopes)
 
         if self.context.is_assign_to_const:
             raise CannotAssignToConstant(ast)
         
-        if type(lhs) is FloatType and type(rhs) not in (FloatType, IntType):
+        if type(lhs) is VoidType: 
             raise TypeMismatchInStatement(ast)
-        elif type(lhs) is not FloatType and type(lhs) is not type(rhs) or type(lhs) is VoidType:
+        elif type(lhs) is FloatType and type(rhs) not in (FloatType, IntType):
             raise TypeMismatchInStatement(ast)
-        elif type(lhs) is type(rhs):
-            if type(lhs) is ArrayType and (type(lhs.eleType) is not type(rhs.eleType) or lhs.size != rhs.size):
-                raise TypeMismatchInStatement(ast)
-            elif type(lhs) is ClassType and not is_sub_class(scopes[-1][lhs.classname.name], scopes[-1][rhs.classname.name], scopes[-1]):
-                raise TypeMismatchInStatement(ast)
+        elif type(lhs) is not FloatType and type(lhs) is not type(rhs):
+            raise TypeMismatchInStatement(ast)
+        elif type(lhs) is ArrayType and (type(lhs.eleType) is not type(rhs.eleType) or lhs.size != rhs.size):
+            raise TypeMismatchInStatement(ast)
+        elif type(lhs) is ClassType and not is_sub_class(scopes[-1][lhs.classname.name], scopes[-1][rhs.classname.name], scopes[-1]):
+            raise TypeMismatchInStatement(ast)
         
         self.context.is_assign = False
         self.context.is_assign_to_const = False 
         
-    def visitCallStmt(self, ast: CallStmt, scopes: list[dict]):
+    def visitCallStmt(self, ast: CallStmt, scopes):
         method_name = ast.method.name
         is_static = '$' in method_name
-        self.context.param_type_list = [self.visit(expr, scopes) for expr in ast.param]
+        self.context.param_type_list = [self.visit(expr, scopes)[0] for expr in ast.param]
         self.context.is_call_member = True
-        call_stmt_type = self.visit(ast.obj, scopes) 
+        call_stmt_type, _ = self.visit(ast.obj, scopes) 
         self.context.is_call_member = False
         
         if type(call_stmt_type) is ClassDecl:
@@ -347,12 +368,12 @@ class StaticChecker(BaseVisitor,Utils):
             raise TypeMismatchInStatement(ast)
             
     
-    def visitCallExpr(self, ast: CallExpr, scopes: list[dict]):
+    def visitCallExpr(self, ast: CallExpr, scopes):
         method_name = ast.method.name
         is_static = '$' in method_name
-        self.context.param_type_list = [self.visit(expr, scopes) for expr in ast.param]
+        self.context.param_type_list = [self.visit(expr, scopes)[0] for expr in ast.param]
         self.context.is_call_member = True
-        call_expr_type = self.visit(ast.obj, scopes) 
+        call_expr_type, _ = self.visit(ast.obj, scopes) 
         self.context.is_call_member = False
         if type(call_expr_type) is ClassDecl:
             if is_static:
@@ -382,12 +403,12 @@ class StaticChecker(BaseVisitor,Utils):
         if type(method_type) is VoidType or self.context.param_type_list is None:
             raise TypeMismatchInExpression(ast)
         
-        return method_type
+        return method_type, True
 
 
-    def visitBinaryOp(self, ast: BinaryOp, scopes: list[dict]):
-        left = self.visit(ast.left, scopes)
-        right = self.visit(ast.right, scopes)
+    def visitBinaryOp(self, ast: BinaryOp, scopes):
+        left, has_value_left = self.visit(ast.left, scopes)
+        right, has_value_right = self.visit(ast.right, scopes)
         op = ast.op
         
         if type(left) is ClassDecl:
@@ -430,12 +451,12 @@ class StaticChecker(BaseVisitor,Utils):
             if type(left) is not IntType or type(right) is not IntType:
                 raise TypeMismatchInExpression(ast)
             return_type = IntType()
-        return return_type
+        return return_type, has_value_left and has_value_right
 
 
-    def visitUnaryOp(self, ast: UnaryOp, scopes: list[dict]):
+    def visitUnaryOp(self, ast: UnaryOp, scopes):
         op = ast.op
-        expr = self.visit(ast.body, scopes)
+        expr, has_value = self.visit(ast.body, scopes)
         if op == '-':
             if type(expr) not in (IntType, FloatType):
                 raise TypeMismatchInExpression(ast)
@@ -444,10 +465,10 @@ class StaticChecker(BaseVisitor,Utils):
             if type(expr) is not BoolType:
                 raise TypeMismatchInExpression(ast)
             return_type = BoolType()
-        return return_type
+        return return_type, has_value
 
 
-    def visitFieldAccess(self, ast: FieldAccess, scopes: list[dict]):
+    def visitFieldAccess(self, ast: FieldAccess, scopes):
         if self.context.is_in_static_method and type(ast.obj) is SelfLiteral:
             raise IllegalMemberAccess(ast)
 
@@ -455,7 +476,7 @@ class StaticChecker(BaseVisitor,Utils):
         is_static = '$' in field_name
         is_call_member = self.context.is_call_member
         self.context.is_call_member = True
-        obj_type = self.visit(ast.obj, scopes)
+        obj_type, _ = self.visit(ast.obj, scopes)
         self.context.is_call_member = is_call_member
         if type(obj_type) is ClassDecl:
             # Static
@@ -469,10 +490,8 @@ class StaticChecker(BaseVisitor,Utils):
                     True
                 )
                 if self.context.is_assign:
-                    ...
-                if self.context.is_const_init_val and not self.has_value[obj_type.classname.name + '.' + field_name]:
-                    self.context.has_value = False
-                return return_type
+                    self.has_value[obj_type.classname.name + '.' + field_name] = self.context.has_value_rhs
+                return return_type, self.has_value[obj_type.classname.name + '.' + field_name]
             else:
                 raise IllegalMemberAccess(ast)
         elif type(obj_type) is ClassType:
@@ -488,32 +507,32 @@ class StaticChecker(BaseVisitor,Utils):
                     self.method_return_type,
                     True
                 )
-                if self.context.is_const_init_val and not self.has_value[class_decl.classname.name + '.' + field_name]:
-                    self.context.has_value = False
-                return return_type
+                if self.context.is_assign:
+                    self.has_value[obj_type.classname.name + '.' + field_name] = self.context.has_value_rhs
+                return return_type, self.has_value[obj_type.classname.name + '.' + field_name]
             else:
                 raise IllegalMemberAccess(ast)
         raise TypeMismatchInExpression(ast)
         
     
-    def visitSelfLiteral(self, ast: SelfLiteral, scopes: list[dict]):
+    def visitSelfLiteral(self, ast: SelfLiteral, scopes):
         obj_class_name = self.context.current_class_name
-        return ClassType(Id(obj_class_name))
+        return ClassType(Id(obj_class_name)), True
     
-    def visitArrayCell(self, ast: ArrayCell, scopes: list[dict]):
-        arr_type = self.visit(ast.arr, scopes)
+    def visitArrayCell(self, ast: ArrayCell, scopes):
+        arr_type, _ = self.visit(ast.arr, scopes)
         if type(arr_type) is not ArrayType:
             raise TypeMismatchInExpression(ast)
         for expr in ast.idx:
-            if type(self.visit(expr, scopes)) is not IntType:
+            if type(self.visit(expr, scopes)[0]) is not IntType:
                 raise TypeMismatchInExpression(ast)
         
         level = len(ast.idx)
-        return get_array_cell_type(arr_type, level, ast)
+        return get_array_cell_type(arr_type, level, ast), True
         
     
-    def visitIf(self, ast: If, scopes: list[dict]):
-        expr_type = self.visit(ast.expr, scopes)
+    def visitIf(self, ast: If, scopes):
+        expr_type, _ = self.visit(ast.expr, scopes)
         if type(expr_type) is not BoolType:
             raise TypeMismatchInStatement(ast)
         self.visit(ast.thenStmt, [{}] + scopes)
@@ -523,31 +542,34 @@ class StaticChecker(BaseVisitor,Utils):
             self.visit(ast.elseStmt, scopes)
         
 
-    def visitFor(self, ast: For, scopes: list[dict]):
-        expr1 = self.visit(ast.expr1, scopes)
-        expr2 = self.visit(ast.expr2, scopes)
+    def visitFor(self, ast: For, scopes):
+        expr1, _ = self.visit(ast.expr1, scopes)
+        expr2, _ = self.visit(ast.expr2, scopes)
         if type(expr1) is not IntType or type(expr2) is not IntType:
             raise TypeMismatchInStatement(ast)
-        if ast.expr3 and type(self.visit(ast.expr3, scopes)) is not IntType:
+        if ast.expr3 and type(self.visit(ast.expr3, scopes)[0]) is not IntType:
             raise TypeMismatchInStatement(ast)
+        id_type, _ =  self.visit(ast.id, scopes)
+        if type(id_type) is not IntType:
+            raise TypeMismatchInStatement(ast)
+        self.visit(Assign(ast.id, ast.expr1), scopes)
         new_scopes = [{}] + scopes
-        new_scopes[0][ast.id.name] = VarDecl(ast.id, IntType())
         self.context.is_in_for_stmt = True
         self.visit(ast.loop, new_scopes)
         self.context.is_in_for_stmt = False
 
         
-    def visitBreak(self, ast: Break, scopes: list[dict]):
+    def visitBreak(self, ast: Break, scopes):
         if not self.context.is_in_for_stmt:
             raise MustInLoop(ast)
 
         
-    def visitContinue(self, ast: Continue, scopes: list[dict]):
+    def visitContinue(self, ast: Continue, scopes):
         if not self.context.is_in_for_stmt:
             raise MustInLoop(ast)
         
         
-    def visitReturn(self, ast: Return, scopes: list[dict]):
+    def visitReturn(self, ast: Return, scopes):
         class_name = self.context.current_class_name
         method_name = self.context.current_method_name
         if class_name == 'Program' and method_name == 'main' or method_name == 'Constructor' or method_name == 'Destructor':
@@ -559,42 +581,42 @@ class StaticChecker(BaseVisitor,Utils):
             if not ast.expr:
                 self.method_return_type[key] = VoidType()
             else:
-                expr_type = self.visit(ast.expr, scopes)
+                expr_type, _ = self.visit(ast.expr, scopes)
                 self.method_return_type[key] = expr_type
         else:
             if not ast.expr and type(self.method_return_type[key]) is not VoidType:
                 raise TypeMismatchInStatement(ast)
             if ast.expr:
-                expr_type = self.visit(ast.expr, scopes)
+                expr_type, _ = self.visit(ast.expr, scopes)
                 if type(expr_type) is not type(self.method_return_type[key]):
                     raise TypeMismatchInStatement(ast)
         
     def visitIntLiteral(self, ast, _):
-        return IntType()
+        return IntType(), True
 
     def visitFloatLiteral(self, ast, _):
-        return FloatType()
+        return FloatType(), True
     
     def visitBooleanLiteral(self, ast, _):
-        return BoolType()
+        return BoolType(), True
     
     def visitStringLiteral(self, ast, _):
-        return StringType()
+        return StringType(), True
     
     def visitNullLiteral(self, ast: NullLiteral, _):
-        ...
+        return None, True
     
-    def visitArrayLiteral(self, ast: ArrayLiteral, scopes: list[dict]):
-        arr_type = [self.visit(expr, scopes) for expr in ast.value]
+    def visitArrayLiteral(self, ast: ArrayLiteral, scopes):
+        arr_type = [self.visit(expr, scopes)[0] for expr in ast.value]
         pivot_type = arr_type[0]
         for ele_type in arr_type[1:]:
             if type(pivot_type) is not type(ele_type):
                 raise IllegalArrayLiteral(ast)
-        return ArrayType(len(arr_type), pivot_type)
+        return ArrayType(len(arr_type), pivot_type), True
     
-    def visitNewExpr(self, ast: NewExpr, scopes: list[dict]):
+    def visitNewExpr(self, ast: NewExpr, scopes):
         class_name = ast.classname.name
-        self.context.param_type_list = [self.visit(expr, scopes) for expr in ast.param]
+        self.context.param_type_list = [self.visit(expr, scopes)[0] for expr in ast.param]
         get_class_member_type(
             scopes[-1],
             scopes[-1][class_name],
@@ -605,23 +627,21 @@ class StaticChecker(BaseVisitor,Utils):
         )
         if self.context.param_type_list is None:
             raise TypeMismatchInExpression(ast)
-        return ClassType(ast.classname)
+        return ClassType(ast.classname), True
         
-    def visitId(self, ast: Id, scopes: list[dict]):
+    def visitId(self, ast: Id, scopes):
         for scope in scopes:
             if ast.name in scope:
                 if type(scope[ast.name]) is ConstDecl:
                     if self.context.is_assign:
                         self.context.is_assign_to_const = True
-                    return scope[ast.name].constType
+                    return scope[ast.name].constType, scope[f'#{ast.name}']
                 elif type(scope[ast.name]) is VarDecl:
-                    if self.context.is_const_init_val:
-                        self.context.has_value = scope[f'#{ast.name}']
-                    return scope[ast.name].varType
+                    return scope[ast.name].varType, scope[f'#{ast.name}']
                 elif type(scope[ast.name]) is AttributeDecl:
-                    break
+                    continue
                 # ClassDecl or MethodDecl
-                return scope[ast.name]
+                return scope[ast.name], True
 
         if self.context.is_call_member:
             raise Undeclared(Class(), ast.name)
